@@ -11,7 +11,9 @@ export const useNarrative = () => {
     behaviorHistory, clearBehaviorHistory,
     narrativeStep, setNarrativeStep,
     narrativePressCount, setNarrativePressCount,
-    activeTab, setActiveTab,
+    guideAudioPending, setGuideAudioPending,
+    guideAdvancePending, setGuideAdvancePending,
+    activeTab,
     currentPressure,
     addRecord
   } = useAppStore();
@@ -36,7 +38,7 @@ export const useNarrative = () => {
     });
     
     isSessionActiveRef.current = false;
-    // 保持当前的 UI 状态，不在这里重置，以便用户能一直看到“呼吸完成”
+    // 保持当前的 UI 状态，不在这里重置，以便用户能一直看到“正念完成”
   }, [addRecord]);
 
   // 1. 监测阶段 -> 评估阶段
@@ -55,7 +57,7 @@ export const useNarrative = () => {
         setMindfulnessState(score < 0 ? 'negative' : 'positive');
       }, 100);
     }
-  }, [appPhase, activeTab, behaviorHistory, clearBehaviorHistory, setAppPhase, setMindfulnessState, setActiveTab]);
+  }, [appPhase, activeTab, behaviorHistory, clearBehaviorHistory, setAppPhase, setMindfulnessState]);
 
   // 2. 处理 Tab 切换：进入 guide 启动叙事，离开则取消
   useEffect(() => {
@@ -63,10 +65,12 @@ export const useNarrative = () => {
     const currentPhase = useAppStore.getState().appPhase;
 
     if (activeTab === 'guide') {
-      if (currentPhase !== 'narrative' && currentPhase !== 'dissolving') {
+      if (currentPhase !== 'narrative' && currentPhase !== 'dissolving' && currentPhase !== 'complete') {
         setAppPhase('narrative');
         setNarrativeStep(0); // 先显示“准备中”
         setNarrativePressCount(0);
+        setGuideAudioPending(false);
+        setGuideAdvancePending(false);
         sessionStartRef.current = Date.now();
         isSessionActiveRef.current = true;
         
@@ -78,9 +82,11 @@ export const useNarrative = () => {
         }, 1500);
       }
     } else if (activeTab === 'monitor') {
-      if (currentPhase === 'narrative' || currentPhase === 'dissolving') {
+      if (currentPhase === 'narrative' || currentPhase === 'dissolving' || currentPhase === 'complete') {
         if (isSessionActiveRef.current) finishSession(false);
         setNarrativeStep(0);
+        setGuideAudioPending(false);
+        setGuideAdvancePending(false);
         setAppPhase('idle');
         setMindfulnessState('idle');
         clearBehaviorHistory();
@@ -95,6 +101,8 @@ export const useNarrative = () => {
     finishSession,
     setAppPhase,
     setMindfulnessState,
+    setGuideAdvancePending,
+    setGuideAudioPending,
     setNarrativePressCount,
     setNarrativeStep,
   ]);
@@ -112,11 +120,20 @@ export const useNarrative = () => {
 
     if (newPresses > 0) {
       const currentStep = Number(narrativeStep);
+      const inputLocked = guideAudioPending && currentStep !== 3;
+
+      if (inputLocked) {
+        return;
+      }
       
       if (currentStep === 1) {
+        setGuideAudioPending(false);
+        setGuideAdvancePending(false);
         setNarrativeStep(2);
       } else if (currentStep === 2) {
         // 只要按了就可以进入下一步，不需要非得长按 3 秒
+        setGuideAudioPending(false);
+        setGuideAdvancePending(false);
         setNarrativeStep(3);
         setNarrativePressCount(0);
       } else if (currentStep === 3) {
@@ -125,16 +142,31 @@ export const useNarrative = () => {
           setNarrativePressCount(newCount);
         } else {
           setNarrativePressCount(3);
-          setTimeout(() => setNarrativeStep(4), 500); // 稍微延迟一下进入第四步
+          if (guideAudioPending) {
+            setGuideAdvancePending(true);
+          } else if (!guideAdvancePending) {
+            setTimeout(() => setNarrativeStep(4), 500); // 稍微延迟一下进入第四步
+          }
         }
       }
     }
-  }, [activeTab, narrativeStep, behaviorHistory.length, narrativePressCount, setNarrativeStep, setNarrativePressCount]);
+  }, [
+    activeTab,
+    behaviorHistory.length,
+    guideAdvancePending,
+    guideAudioPending,
+    narrativePressCount,
+    narrativeStep,
+    setGuideAdvancePending,
+    setGuideAudioPending,
+    setNarrativePressCount,
+    setNarrativeStep,
+  ]);
 
   // 4. 叙事阶段：监听压力 (缓缓松开)
   useEffect(() => {
     if (activeTab !== 'guide') return;
-    let finishTimer: NodeJS.Timeout | undefined;
+    if (guideAudioPending) return;
 
     if (narrativeStep === 4) {
       if (currentPressure === 0) {
@@ -142,18 +174,27 @@ export const useNarrative = () => {
         const t = setTimeout(() => {
           setNarrativeStep(5);
           setAppPhase('dissolving');
-          finishTimer = setTimeout(() => {
-            finishSession(true);
-            setAppPhase('narrative');
-          }, DISSOLVE_DURATION_MS);
         }, 2500); // 增加这里的延迟，确保第四步的文字能和语音同步停留足够长的时间
         return () => {
           clearTimeout(t);
-          if (finishTimer) clearTimeout(finishTimer);
         };
       }
     }
-  }, [activeTab, narrativeStep, currentPressure, finishSession, setAppPhase, setNarrativeStep]);
+  }, [activeTab, narrativeStep, guideAudioPending, currentPressure, setAppPhase, setNarrativeStep]);
+
+  // 5. 云消散动画结束后进入完成态，再由 Home 页负责停顿 2 秒回到角色选择页。
+  useEffect(() => {
+    if (appPhase !== 'dissolving') {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      finishSession(true);
+      setAppPhase('complete');
+    }, DISSOLVE_DURATION_MS);
+
+    return () => clearTimeout(timer);
+  }, [appPhase, finishSession, setAppPhase]);
 
   const cancelSession = () => {
     if (isSessionActiveRef.current) {
@@ -169,6 +210,8 @@ export const useNarrative = () => {
         isSessionActiveRef.current = false;
       }
       state.setNarrativeStep(0);
+      state.setGuideAudioPending(false);
+      state.setGuideAdvancePending(false);
       state.setAppPhase('idle');
       state.setMindfulnessState('idle');
       state.clearBehaviorHistory();

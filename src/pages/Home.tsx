@@ -19,7 +19,10 @@ export const Home = () => {
     currentBehavior,
     behaviorHistory,
     setCurrentBehavior,
-    setCurrentPressure
+    setCurrentPressure,
+    guideAudioPending,
+    setGuideAudioPending,
+    setGuideAdvancePending
   } = useAppStore();
   
   useNarrative(); // Activate narrative hook
@@ -28,29 +31,91 @@ export const Home = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const bgmRef = useRef<HTMLAudioElement>(null);
 
-  // 控制背景音乐
+  // 控制背景音乐：角色页不播；流程内持续播放，步骤语音播放时暂停。
   useEffect(() => {
-    if (bgmRef.current) {
-      bgmRef.current.muted = isMuted;
-    }
-    
-    if (activeTab === 'guide') {
-      bgmRef.current?.play().catch(err => console.log('BGM播放失败(需用户交互)', err));
-    } else {
-      bgmRef.current?.pause();
-      if (bgmRef.current) bgmRef.current.currentTime = 0;
-    }
-  }, [activeTab, isMuted]);
+    const bgm = bgmRef.current;
+    const guideAudioActive = activeTab === 'guide' && narrativeStep >= 1 && narrativeStep <= 4 && guideAudioPending;
+    const shouldPlayBgm =
+      !isMuted &&
+      !guideAudioActive &&
+      appPhase !== 'dissolving' &&
+      (activeTab === 'monitor' || activeTab === 'guide');
 
-  // 监听 guideStep 变化播放对应的音频
-  useEffect(() => {
-    if (activeTab === 'guide' && narrativeStep >= 1 && narrativeStep <= 4) {
-      if (audioRef.current) {
-        audioRef.current.src = `/audio/step${narrativeStep}.mp3`;
-        audioRef.current.play().catch(err => console.log('等待用户交互后才能播放音频', err));
-      }
+    if (!bgm) {
+      return;
     }
-  }, [narrativeStep, activeTab, currentRole]);
+
+    bgm.muted = isMuted;
+
+    if (shouldPlayBgm) {
+      bgm.play().catch(err => console.log('BGM播放失败(需用户交互)', err));
+    } else {
+      bgm.pause();
+      bgm.currentTime = 0;
+    }
+  }, [activeTab, appPhase, guideAudioPending, isMuted, narrativeStep]);
+
+  // 监听 guideStep 变化播放对应的语音；播放期间暂停 BGM，结束后由 BGM effect 恢复。
+  useEffect(() => {
+    const guideAudio = audioRef.current;
+    const bgm = bgmRef.current;
+    const shouldPlayStepAudio = activeTab === 'guide' && narrativeStep >= 1 && narrativeStep <= 4 && !isMuted;
+
+    if (!guideAudio) {
+      return;
+    }
+
+    if (!shouldPlayStepAudio) {
+      guideAudio.pause();
+      guideAudio.removeAttribute('src');
+      guideAudio.load();
+      setGuideAudioPending(false);
+      return;
+    }
+
+    bgm?.pause();
+    if (bgm) bgm.currentTime = 0;
+
+    setGuideAudioPending(true);
+    setGuideAdvancePending(false);
+    guideAudio.muted = isMuted;
+    guideAudio.src = `/audio/step${narrativeStep}.mp3`;
+    guideAudio.currentTime = 0;
+
+    let settled = false;
+    const releaseGuideAudioLock = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const state = useAppStore.getState();
+      state.setGuideAudioPending(false);
+
+      if (state.narrativeStep === 3 && state.guideAdvancePending) {
+        state.setGuideAdvancePending(false);
+        state.setNarrativeStep(4);
+      }
+    };
+
+    guideAudio.addEventListener('ended', releaseGuideAudioLock);
+    guideAudio.addEventListener('error', releaseGuideAudioLock);
+    guideAudio.play().catch(err => {
+      console.log('等待用户交互后才能播放音频', err);
+      releaseGuideAudioLock();
+    });
+
+    return () => {
+      guideAudio.removeEventListener('ended', releaseGuideAudioLock);
+      guideAudio.removeEventListener('error', releaseGuideAudioLock);
+    };
+  }, [
+    activeTab,
+    currentRole,
+    isMuted,
+    narrativeStep,
+    setGuideAdvancePending,
+    setGuideAudioPending,
+  ]);
 
   // 如果没有选择角色，重定向到角色选择页
   useEffect(() => {
@@ -58,6 +123,21 @@ export const Home = () => {
       navigate('/roles');
     }
   }, [currentRole, navigate]);
+
+  useEffect(() => {
+    if (appPhase !== 'complete') {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      audioRef.current?.pause();
+      bgmRef.current?.pause();
+      setActiveTab('monitor');
+      navigate('/roles');
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [appPhase, navigate, setActiveTab]);
 
   if (!currentRole) return null;
 
@@ -114,13 +194,16 @@ export const Home = () => {
     if (appPhase === 'dissolving') {
       return "压力随云飘散～";
     }
+    if (appPhase === 'complete') {
+      return "正念完成";
+    }
     if (activeTab === 'guide') {
       switch (Number(narrativeStep)) {
         case 1: return "轻按一下";
         case 2: return "长按3秒";
         case 3: return `连按三下 ${narrativePressCount}/3`;
         case 4: return "慢慢松开";
-        case 5: return "呼吸完成";
+        case 5: return "正念完成";
         default: return "准备中";
       }
     }
@@ -133,8 +216,9 @@ export const Home = () => {
     return "陪伴中";
   };
   
-  const isNarrative = appPhase === 'narrative' || appPhase === 'dissolving';
+  const isNarrative = appPhase === 'narrative' || appPhase === 'dissolving' || appPhase === 'complete';
   const isDissolving = appPhase === 'dissolving';
+  const isFinishing = appPhase === 'dissolving' || appPhase === 'complete';
 
   return (
     <div 
@@ -145,7 +229,7 @@ export const Home = () => {
       <audio ref={bgmRef} src="/audio/bgm-soothing.mp3" loop className="hidden" />
 
       {/* 音乐控制开关 - 调整到圆屏可见区域（左上角偏内侧，稍微右移一点） */}
-      {activeTab === 'guide' && !isDissolving && (
+      {activeTab === 'guide' && !isFinishing && (
         <button
           onClick={() => setIsMuted(!isMuted)}
           className="absolute top-10 left-12 z-[60] p-2 text-zinc-400 hover:text-zinc-600 transition-colors bg-white/50 rounded-full backdrop-blur shadow-sm"
@@ -155,7 +239,7 @@ export const Home = () => {
       )}
 
       {/* 顶部极简状态切换 */}
-      <div className={`absolute top-8 flex gap-2 z-50 transition-opacity duration-500 ${isDissolving ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      <div className={`absolute top-8 flex gap-2 z-50 transition-opacity duration-500 ${isFinishing ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button
           onClick={() => setActiveTab('monitor')}
           className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all relative z-[60] ${
@@ -228,7 +312,7 @@ export const Home = () => {
         {isDissolving && <CloudDissolveOverlay role={currentRole} />}
       </AnimatePresence>
 
-      <div className={`absolute right-3 top-1/2 z-50 flex -translate-y-1/2 transform flex-col gap-2 transition-opacity duration-500 ${isDissolving ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      <div className={`absolute right-3 top-1/2 z-50 flex -translate-y-1/2 transform flex-col gap-2 transition-opacity duration-500 ${isFinishing ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button 
           onMouseDown={() => simulateSensor('hard_press', 0.8)}
           className="w-8 h-8 bg-zinc-200/60 text-zinc-600 text-[9px] rounded-full hover:bg-zinc-300 active:scale-95 transition-all shadow-sm flex items-center justify-center font-medium"

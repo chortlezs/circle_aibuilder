@@ -4,7 +4,7 @@ import { persist } from 'zustand/middleware';
 // 更新为硬件输出的三个数值对应的行为
 export type BehaviorType = 'idle' | 'light_press' | 'normal_press' | 'hard_press';
 export type MindfulnessState = 'positive' | 'negative' | 'transforming' | 'idle';
-export type AppPhase = 'idle' | 'monitoring' | 'evaluating' | 'narrative' | 'dissolving';
+export type AppPhase = 'idle' | 'monitoring' | 'evaluating' | 'narrative' | 'dissolving' | 'complete';
 export type NarrativeStep = 0 | 1 | 2 | 3 | 4 | 5;
 export type ActiveTab = 'monitor' | 'guide';
 export type DeviceStatus = 'disconnected' | 'connecting' | 'connected';
@@ -57,6 +57,10 @@ interface AppState {
   setNarrativeStep: (step: NarrativeStep) => void;
   narrativePressCount: number;
   setNarrativePressCount: (count: number) => void;
+  guideAudioPending: boolean;
+  setGuideAudioPending: (pending: boolean) => void;
+  guideAdvancePending: boolean;
+  setGuideAdvancePending: (pending: boolean) => void;
 
   // Role
   currentRole: Role | null;
@@ -99,6 +103,10 @@ export const useAppStore = create<AppState>()(
       setNarrativeStep: (step) => set({ narrativeStep: step }),
       narrativePressCount: 0,
       setNarrativePressCount: (count) => set({ narrativePressCount: count }),
+      guideAudioPending: false,
+      setGuideAudioPending: (pending) => set({ guideAudioPending: pending }),
+      guideAdvancePending: false,
+      setGuideAdvancePending: (pending) => set({ guideAdvancePending: pending }),
 
       currentRole: null,
       setCurrentRole: (role) => set({ currentRole: role }),

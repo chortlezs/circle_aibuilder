@@ -6,6 +6,41 @@ import { useNavigate } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { CloudDissolveOverlay } from '../components/CloudDissolveOverlay';
 
+type SimulatedPressBehavior = 'light_press' | 'normal_press' | 'hard_press';
+
+const SIMULATED_PRESS_BY_KEY: Record<string, { behavior: SimulatedPressBehavior; pressure: number }> = {
+  '1': { behavior: 'light_press', pressure: 0.2 },
+  '2': { behavior: 'normal_press', pressure: 0.5 },
+  '3': { behavior: 'hard_press', pressure: 0.8 },
+};
+
+const triggerSimulatedPress = (behavior: SimulatedPressBehavior, pressure: number) => {
+  const {
+    addBehaviorToHistory,
+    appPhase,
+    setAppPhase,
+    activeTab,
+    setCurrentBehavior,
+    setCurrentPressure,
+  } = useAppStore.getState();
+
+  setCurrentBehavior(behavior);
+  setCurrentPressure(pressure);
+
+  if (appPhase === 'idle' && activeTab === 'monitor') {
+    setAppPhase('monitoring');
+  }
+
+  if (appPhase !== 'evaluating') {
+    addBehaviorToHistory(behavior);
+  }
+
+  setTimeout(() => {
+    setCurrentBehavior('idle');
+    setCurrentPressure(0);
+  }, 1500);
+};
+
 export const Home = () => {
   const navigate = useNavigate();
   const { 
@@ -16,10 +51,8 @@ export const Home = () => {
     mindfulnessState, 
     narrativeStep,
     narrativePressCount,
-    currentBehavior,
     behaviorHistory,
-    setCurrentBehavior,
-    setCurrentPressure,
+    currentBehavior,
     guideAudioPending,
     setGuideAudioPending,
     setGuideAdvancePending
@@ -139,34 +172,40 @@ export const Home = () => {
     return () => clearTimeout(timer);
   }, [appPhase, navigate, setActiveTab]);
 
+  useEffect(() => {
+    if (!currentRole || appPhase === 'dissolving' || appPhase === 'complete') {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTextInput =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT' ||
+        target?.isContentEditable;
+
+      if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isTextInput) {
+        return;
+      }
+
+      const simulatedPress = SIMULATED_PRESS_BY_KEY[event.key];
+      if (!simulatedPress) {
+        return;
+      }
+
+      event.preventDefault();
+      triggerSimulatedPress(simulatedPress.behavior, simulatedPress.pressure);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [appPhase, currentRole]);
+
   if (!currentRole) return null;
-
-  // 模拟引脚输入
-  const simulateSensor = (behavior: 'idle' | 'light_press' | 'normal_press' | 'hard_press', pressure: number) => {
-    const { addBehaviorToHistory, appPhase, setAppPhase, activeTab } = useAppStore.getState();
-
-    // 1. 设置当前压力和行为
-    setCurrentBehavior(behavior);
-    setCurrentPressure(pressure);
-
-    // 2. 如果在监测页且为空闲，启动监测
-    if (appPhase === 'idle' && activeTab === 'monitor') {
-      setAppPhase('monitoring');
-    }
-
-    // 3. 记录历史，用于触发后续的逻辑（比如 5 次后评估，或者 guide 的步骤推进）
-    if (appPhase !== 'evaluating' && behavior !== 'idle') {
-      addBehaviorToHistory(behavior);
-    }
-    
-    // Simulate release after 1.5s
-    if (behavior !== 'idle') {
-      setTimeout(() => {
-        setCurrentBehavior('idle');
-        setCurrentPressure(0);
-      }, 1500);
-    }
-  };
 
   // 获取表情
   const getFaceExpression = () => {
@@ -307,31 +346,9 @@ export const Home = () => {
         </div>
       </div>
 
-      {/* 模拟硬件传感器面板 - 缩小并移至右侧 */}
       <AnimatePresence>
         {isDissolving && <CloudDissolveOverlay role={currentRole} />}
       </AnimatePresence>
-
-      <div className={`absolute right-3 top-1/2 z-50 flex -translate-y-1/2 transform flex-col gap-2 transition-opacity duration-500 ${isFinishing ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-        <button 
-          onMouseDown={() => simulateSensor('hard_press', 0.8)}
-          className="w-8 h-8 bg-zinc-200/60 text-zinc-600 text-[9px] rounded-full hover:bg-zinc-300 active:scale-95 transition-all shadow-sm flex items-center justify-center font-medium"
-        >
-          重按
-        </button>
-        <button 
-          onMouseDown={() => simulateSensor('normal_press', 0.5)}
-          className="w-8 h-8 bg-zinc-200/60 text-zinc-600 text-[9px] rounded-full hover:bg-zinc-300 active:scale-95 transition-all shadow-sm flex items-center justify-center font-medium"
-        >
-          正常
-        </button>
-        <button 
-          onMouseDown={() => simulateSensor('light_press', 0.2)}
-          className="w-8 h-8 bg-zinc-200/60 text-zinc-600 text-[9px] rounded-full hover:bg-zinc-300 active:scale-95 transition-all shadow-sm flex items-center justify-center font-medium"
-        >
-          轻按
-        </button>
-      </div>
 
     </div>
   );

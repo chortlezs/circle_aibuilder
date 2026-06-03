@@ -4,9 +4,10 @@ import { persist } from 'zustand/middleware';
 // 更新为硬件输出的三个数值对应的行为
 export type BehaviorType = 'idle' | 'light_press' | 'normal_press' | 'hard_press';
 export type MindfulnessState = 'positive' | 'negative' | 'transforming' | 'idle';
-export type AppPhase = 'idle' | 'monitoring' | 'evaluating' | 'narrative';
+export type AppPhase = 'idle' | 'monitoring' | 'evaluating' | 'narrative' | 'dissolving';
 export type NarrativeStep = 0 | 1 | 2 | 3 | 4 | 5;
 export type ActiveTab = 'monitor' | 'guide';
+export type DeviceStatus = 'disconnected' | 'connecting' | 'connected';
 
 export interface Role {
   id: string;
@@ -27,6 +28,10 @@ export interface SessionRecord {
 }
 
 interface AppState {
+  // Device connection
+  deviceStatus: DeviceStatus;
+  setDeviceStatus: (status: DeviceStatus) => void;
+
   // Tabs & Mode
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -67,6 +72,9 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       // Initial state
+      deviceStatus: 'disconnected',
+      setDeviceStatus: (status) => set({ deviceStatus: status }),
+
       activeTab: 'monitor',
       setActiveTab: (tab) => set({ activeTab: tab }),
 

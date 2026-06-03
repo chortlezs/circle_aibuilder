@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '../store/appStore';
 
 const EVALUATION_THRESHOLD = 5; // 监测到 5 次动作后进行结算
+const DISSOLVE_DURATION_MS = 2800;
 
 export const useNarrative = () => {
   const { 
-    mindfulnessState, setMindfulnessState,
+    setMindfulnessState,
     appPhase, setAppPhase,
     behaviorHistory, clearBehaviorHistory,
     narrativeStep, setNarrativeStep,
@@ -17,6 +18,26 @@ export const useNarrative = () => {
 
   const sessionStartRef = useRef<number>(0);
   const isSessionActiveRef = useRef<boolean>(false);
+
+  const finishSession = useCallback((success: boolean) => {
+    if (!isSessionActiveRef.current) return;
+    
+    const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000);
+    const startState = useAppStore.getState().mindfulnessState;
+    
+    addRecord({
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      duration,
+      startState: startState,
+      endState: success ? 'positive' : 'negative',
+      negativeCount: 0,
+      successTransform: success
+    });
+    
+    isSessionActiveRef.current = false;
+    // 保持当前的 UI 状态，不在这里重置，以便用户能一直看到“呼吸完成”
+  }, [addRecord]);
 
   // 1. 监测阶段 -> 评估阶段
   useEffect(() => {
@@ -39,8 +60,10 @@ export const useNarrative = () => {
   // 2. 处理 Tab 切换：进入 guide 启动叙事，离开则取消
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
+    const currentPhase = useAppStore.getState().appPhase;
+
     if (activeTab === 'guide') {
-      if (appPhase !== 'narrative') {
+      if (currentPhase !== 'narrative' && currentPhase !== 'dissolving') {
         setAppPhase('narrative');
         setNarrativeStep(0); // 先显示“准备中”
         setNarrativePressCount(0);
@@ -55,7 +78,7 @@ export const useNarrative = () => {
         }, 1500);
       }
     } else if (activeTab === 'monitor') {
-      if (appPhase === 'narrative') {
+      if (currentPhase === 'narrative' || currentPhase === 'dissolving') {
         if (isSessionActiveRef.current) finishSession(false);
         setNarrativeStep(0);
         setAppPhase('idle');
@@ -66,7 +89,15 @@ export const useNarrative = () => {
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [activeTab]);
+  }, [
+    activeTab,
+    clearBehaviorHistory,
+    finishSession,
+    setAppPhase,
+    setMindfulnessState,
+    setNarrativePressCount,
+    setNarrativeStep,
+  ]);
 
   // 3. 叙事阶段：监听行为 (按一下、按三下)
   const prevHistoryLen = useRef(behaviorHistory.length);
@@ -103,41 +134,26 @@ export const useNarrative = () => {
   // 4. 叙事阶段：监听压力 (缓缓松开)
   useEffect(() => {
     if (activeTab !== 'guide') return;
+    let finishTimer: NodeJS.Timeout | undefined;
 
     if (narrativeStep === 4) {
       if (currentPressure === 0) {
-        // 松开后稍微延迟进入结束状态，显得自然，增加延迟以等待 step4 的音频播放完毕
+        // 松开后稍微延迟，再进入压力云消散动画。
         const t = setTimeout(() => {
           setNarrativeStep(5);
-          // 给予足够的时间让最后一段音频（step5）播放完毕，不自动跳转回 monitor
-          setTimeout(() => {
+          setAppPhase('dissolving');
+          finishTimer = setTimeout(() => {
             finishSession(true);
-          }, 4000);
+            setAppPhase('narrative');
+          }, DISSOLVE_DURATION_MS);
         }, 2500); // 增加这里的延迟，确保第四步的文字能和语音同步停留足够长的时间
-        return () => clearTimeout(t);
+        return () => {
+          clearTimeout(t);
+          if (finishTimer) clearTimeout(finishTimer);
+        };
       }
     }
-  }, [activeTab, narrativeStep, currentPressure, setNarrativeStep]);
-
-  const finishSession = (success: boolean) => {
-    if (!isSessionActiveRef.current) return;
-    
-    const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000);
-    const startState = useAppStore.getState().mindfulnessState;
-    
-    addRecord({
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      duration,
-      startState: startState,
-      endState: success ? 'positive' : 'negative',
-      negativeCount: 0,
-      successTransform: success
-    });
-    
-    isSessionActiveRef.current = false;
-    // 保持当前的 UI 状态，不在这里重置，以便用户能一直看到“呼吸完成”
-  };
+  }, [activeTab, narrativeStep, currentPressure, finishSession, setAppPhase, setNarrativeStep]);
 
   const cancelSession = () => {
     if (isSessionActiveRef.current) {

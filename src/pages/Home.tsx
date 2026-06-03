@@ -3,6 +3,8 @@ import { useAppStore } from '../store/appStore';
 import { useNarrative } from '../hooks/useNarrative';
 import { Volume2, VolumeX } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
+import { CloudDissolveOverlay } from '../components/CloudDissolveOverlay';
 
 export const Home = () => {
   const navigate = useNavigate();
@@ -109,6 +111,9 @@ export const Home = () => {
 
   // 极简叙事文案
   const getNarrativeText = () => {
+    if (appPhase === 'dissolving') {
+      return "压力随云飘散～";
+    }
     if (activeTab === 'guide') {
       switch (Number(narrativeStep)) {
         case 1: return "轻按一下";
@@ -128,7 +133,8 @@ export const Home = () => {
     return "陪伴中";
   };
   
-  const isNarrative = appPhase === 'narrative';
+  const isNarrative = appPhase === 'narrative' || appPhase === 'dissolving';
+  const isDissolving = appPhase === 'dissolving';
 
   return (
     <div 
@@ -139,7 +145,7 @@ export const Home = () => {
       <audio ref={bgmRef} src="/audio/bgm-soothing.mp3" loop className="hidden" />
 
       {/* 音乐控制开关 - 调整到圆屏可见区域（左上角偏内侧，稍微右移一点） */}
-      {activeTab === 'guide' && (
+      {activeTab === 'guide' && !isDissolving && (
         <button
           onClick={() => setIsMuted(!isMuted)}
           className="absolute top-10 left-12 z-[60] p-2 text-zinc-400 hover:text-zinc-600 transition-colors bg-white/50 rounded-full backdrop-blur shadow-sm"
@@ -149,7 +155,7 @@ export const Home = () => {
       )}
 
       {/* 顶部极简状态切换 */}
-      <div className="absolute top-8 flex gap-2 z-50">
+      <div className={`absolute top-8 flex gap-2 z-50 transition-opacity duration-500 ${isDissolving ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button
           onClick={() => setActiveTab('monitor')}
           className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all relative z-[60] ${
@@ -184,7 +190,7 @@ export const Home = () => {
       </div>
 
       {/* 中心角色 (全屏呼吸光晕) */}
-      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-10 w-full h-full pointer-events-none">
+      <div className={`absolute top-1/2 left-1/2 z-10 flex h-full w-full -translate-x-1/2 -translate-y-1/2 transform items-center justify-center transition-opacity duration-500 pointer-events-none ${isDissolving ? 'opacity-0' : 'opacity-100'}`}>
         {/* 全屏呼吸光晕背景 */}
         <div
           className={`absolute w-[150%] h-[150%] rounded-full transition-all duration-1000 ${
@@ -218,7 +224,11 @@ export const Home = () => {
       </div>
 
       {/* 模拟硬件传感器面板 - 缩小并移至右侧 */}
-      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex flex-col gap-2 z-50">
+      <AnimatePresence>
+        {isDissolving && <CloudDissolveOverlay role={currentRole} />}
+      </AnimatePresence>
+
+      <div className={`absolute right-3 top-1/2 z-50 flex -translate-y-1/2 transform flex-col gap-2 transition-opacity duration-500 ${isDissolving ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <button 
           onMouseDown={() => simulateSensor('hard_press', 0.8)}
           className="w-8 h-8 bg-zinc-200/60 text-zinc-600 text-[9px] rounded-full hover:bg-zinc-300 active:scale-95 transition-all shadow-sm flex items-center justify-center font-medium"
